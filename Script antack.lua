@@ -1,234 +1,122 @@
+-- Auto Attack Script
+-- Toggle button UI
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local isEnabled = false
+local attackCooldown = 0.5 -- giây giữa các lần attack
+local lastAttack = 0
+local attackRange = 20 -- khoảng cách tấn công
 
-local MaxDistance = 50
-local ClickSpeed = 0.40
-local IsEnabled = false
-local LastClickTime = 0
-local NearestTarget = nil
-
--- Chờ LocalPlayer tải xong
-repeat task.wait() until LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-
--- GUI
+-- ===== TẠO NÚT BẬT/TẮT =====
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "DeltaAutoClick"
+ScreenGui.Name = "AutoAttackGui"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = game:GetService("CoreGui")
+ScreenGui.Parent = LocalPlayer.PlayerGui
 
 local ToggleButton = Instance.new("TextButton")
-ToggleButton.Size = UDim2.new(0, 120, 0, 30)
-ToggleButton.Position = UDim2.new(0, 20, 0, 20)
-ToggleButton.Text = "BẬT/TẮT"
-ToggleButton.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
-ToggleButton.TextColor3 = Color3.new(1, 1, 1)
+ToggleButton.Size = UDim2.new(0, 120, 0, 50)
+ToggleButton.Position = UDim2.new(0, 10, 0.5, -25)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.Text = "Auto Attack\nOFF"
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.TextSize = 14
 ToggleButton.Parent = ScreenGui
 
-local DistLabel = Instance.new("TextLabel")
-DistLabel.Size = UDim2.new(0, 120, 0, 20)
-DistLabel.Position = UDim2.new(0, 20, 0, 55)
-DistLabel.Text = "Khoảng cách: 50"
-DistLabel.BackgroundColor3 = Color3.new(0.15, 0.15, 0.15)
-DistLabel.TextColor3 = Color3.new(1, 1, 1)
-DistLabel.Parent = ScreenGui
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 8)
+UICorner.Parent = ToggleButton
 
-local DistSlider = Instance.new("TextBox")
-DistSlider.Size = UDim2.new(0, 120, 0, 20)
-DistSlider.Position = UDim2.new(0, 20, 0, 78)
-DistSlider.Text = "50"
-DistSlider.PlaceholderText = "Khoảng cách"
-DistSlider.Parent = ScreenGui
-
-local SpeedLabel = Instance.new("TextLabel")
-SpeedLabel.Size = UDim2.new(0, 120, 0, 20)
-SpeedLabel.Position = UDim2.new(0, 20, 0, 103)
-SpeedLabel.Text = "Click Speed: 0.40"
-SpeedLabel.BackgroundColor3 = Color3.new(0.15, 0.15, 0.15)
-SpeedLabel.TextColor3 = Color3.new(1, 1, 1)
-SpeedLabel.Parent = ScreenGui
-
-local SpeedSlider = Instance.new("TextBox")
-SpeedSlider.Size = UDim2.new(0, 120, 0, 20)
-SpeedSlider.Position = UDim2.new(0, 20, 0, 126)
-SpeedSlider.Text = "0.40"
-SpeedSlider.PlaceholderText = "Tốc độ click"
-SpeedSlider.Parent = ScreenGui
-
--- Vòng tròn
-local Circle = Drawing.new("Circle")
-Circle.Visible = false
-Circle.Color = Color3.new(1, 0, 0)
-Circle.Thickness = 1
-Circle.Filled = false
-
--- Lưu trữ highlight box
-local HighlightBoxes = {}
-
-local function CreateHighlight(player)
-    if HighlightBoxes[player] then return HighlightBoxes[player] end
-    local box = Drawing.new("Square")
-    box.Visible = false
-    box.Color = Color3.new(1, 0, 0)
-    box.Thickness = 2
-    box.Filled = false
-    HighlightBoxes[player] = box
-    return box
-end
-
-local function RemoveHighlight(player)
-    if HighlightBoxes[player] then
-        HighlightBoxes[player]:Remove()
-        HighlightBoxes[player] = nil
-    end
-end
-
-local function GetNearestPlayer()
+-- ===== HÀM TÌM NHÂN VẬT GẦN NHẤT =====
+local function getNearestEnemy()
     local nearest = nil
-    local minDist = MaxDistance
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return nil end
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        local char = player.Character
-        if not char then continue end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if not hrp then continue end
-        local humanoid = char:FindFirstChild("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then continue end
-        local dist = (root.Position - hrp.Position).Magnitude
-        if dist < minDist then
-            minDist = dist
-            nearest = player
+    local minDist = attackRange
+    
+    local myRoot = Character:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local char = player.Character
+            if char then
+                local root = char:FindFirstChild("HumanoidRootPart")
+                local hum = char:FindFirstChild("Humanoid")
+                if root and hum and hum.Health > 0 then
+                    local dist = (myRoot.Position - root.Position).Magnitude
+                    if dist < minDist then
+                        minDist = dist
+                        nearest = char
+                    end
+                end
+            end
         end
     end
     return nearest
 end
 
-local function UpdateHighlights()
-    local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        local char = player.Character
-        if not char then
-            RemoveHighlight(player)
-            continue
-        end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local head = char:FindFirstChild("Head")
-        if not hrp or not head then
-            RemoveHighlight(player)
-            continue
-        end
-        local humanoid = char:FindFirstChild("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then
-            RemoveHighlight(player)
-            continue
-        end
-        local dist = (root.Position - hrp.Position).Magnitude
-        if dist <= MaxDistance and IsEnabled then
-            local box = CreateHighlight(player)
-            local headPos, headOnScreen = Camera:WorldToViewpointPoint(head.Position)
-            local footPos = hrp.Position - Vector3.new(0, 3.5, 0)
-            local footScreen, footOnScreen = Camera:WorldToViewportPoint(footPos)
-            if headOnScreen and footOnScreen then
-                local size = math.abs(headPos.Y - footScreen.Y)
-                local width = size * 0.5
-                box.Visible = true
-                box.Position = Vector2.new(headPos.X - width/2, headPos.Y)
-                box.Size = Vector2.new(width, size)
-            else
-                box.Visible = false
+-- ===== HÀM ATTACK =====
+local function attackEnemy(target)
+    if not target then return end
+    local hum = target:FindFirstChild("Humanoid")
+    if hum and hum.Health > 0 then
+        -- Simulate click/touch lên nhân vật
+        local root = target:FindFirstChild("HumanoidRootPart")
+        if root then
+            -- Fire tool hoặc simulate tap
+            local tool = Character:FindFirstChildOfClass("Tool")
+            if tool and tool:FindFirstChild("Handle") then
+                -- Nếu có tool thì activate
+                local activateEvent = tool:FindFirstChild("RemoteEvent") 
+                    or tool:FindFirstChild("RemoteFunction")
+                tool:Activate()
             end
-        else
-            RemoveHighlight(player)
+            
+            -- Di chuyển nhìn về phía enemy
+            LocalPlayer.Character.Humanoid:MoveTo(
+                root.Position + (Character.HumanoidRootPart.Position - root.Position).Unit * 5
+            )
         end
     end
 end
 
-local function ClickOnPlayer(player)
-    if not player or not player.Character then return end
-    local humanoid = player.Character:FindFirstChild("Humanoid")
-    if not humanoid or humanoid.Health <= 0 then return end
-    local torso = player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso")
-    local targetPart = torso or player.Character:FindFirstChild("HumanoidRootPart")
-    if not targetPart then return end
-    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-    if onScreen then
-        VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, true, game, 1)
-        VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, false, game, 1)
-    end
-end
-
-local function UpdateCircle()
-    if IsEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        local rootPos = LocalPlayer.Character.HumanoidRootPart.Position
-        local screenPos, onScreen = Camera:WorldToViewportPoint(rootPos)
-        if onScreen then
-            Circle.Visible = true
-            Circle.Position = Vector2.new(screenPos.X, screenPos.Y)
-            local depth = (rootPos - Camera.CFrame.Position).Magnitude
-            Circle.Radius = MaxDistance * (Camera.ViewportSize.Y / (2 * math.tan(math.rad(Camera.FieldOfView/2)) * depth))
-        else
-            Circle.Visible = false
-        end
-    else
-        Circle.Visible = false
-    end
-end
-
-RunService.RenderStepped:Connect(function()
-    local newDist = tonumber(DistSlider.Text)
-    if newDist and newDist > 0 then
-        MaxDistance = newDist
-        DistLabel.Text = "Khoảng cách: " .. newDist
-    end
-    local newSpeed = tonumber(SpeedSlider.Text)
-    if newSpeed and newSpeed > 0 then
-        ClickSpeed = newSpeed
-        SpeedLabel.Text = "Click Speed: " .. string.format("%.2f", newSpeed)
-    end
-    UpdateCircle()
-    UpdateHighlights()
-    if IsEnabled then
-        local currentTime = tick()
-        if currentTime - LastClickTime >= ClickSpeed then
-            NearestTarget = GetNearestPlayer()
-            if NearestTarget then
-                ClickOnPlayer(NearestTarget)
-                LastClickTime = currentTime
-            end
-        end
-    end
-end)
-
+-- ===== TOGGLE LOGIC =====
 ToggleButton.MouseButton1Click:Connect(function()
-    IsEnabled = not IsEnabled
-    if IsEnabled then
-        ToggleButton.BackgroundColor3 = Color3.new(0, 1, 0)
-        ToggleButton.Text = "ĐANG BẬT"
+    isEnabled = not isEnabled
+    if isEnabled then
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        ToggleButton.Text = "Auto Attack\nON"
     else
-        ToggleButton.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
-        ToggleButton.Text = "ĐANG TẮT"
-        Circle.Visible = false
-        for player, _ in pairs(HighlightBoxes) do
-            RemoveHighlight(player)
-        end
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        ToggleButton.Text = "Auto Attack\nOFF"
     end
 end)
 
-Players.PlayerRemoving:Connect(function(player)
-    RemoveHighlight(player)
-end)
-
-ScreenGui.Destroying:Connect(function()
-    Circle:Remove()
-    for player, _ in pairs(HighlightBoxes) do
-        RemoveHighlight(player)
+-- ===== MAIN LOOP =====
+RunService.Heartbeat:Connect(function()
+    if not isEnabled then return end
+    
+    -- Cập nhật character nếu respawn
+    Character = LocalPlayer.Character
+    if not Character then return end
+    
+    local now = tick()
+    if now - lastAttack < attackCooldown then return end
+    lastAttack = now
+    
+    local target = getNearestEnemy()
+    if target then
+        attackEnemy(target)
     end
 end)
+
+-- Cập nhật character khi respawn
+LocalPlayer.CharacterAdded:Connect(function(char)
+    Character = char
+end)
+
+print("Auto Attack Script loaded! Nhấn nút để bật/tắt.")
