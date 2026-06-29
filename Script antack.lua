@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
@@ -9,9 +10,15 @@ local MaxDistance = 50
 local ClickSpeed = 0.40
 local IsEnabled = false
 local LastClickTime = 0
+local NearestTarget = nil
 
+-- Chờ LocalPlayer tải xong
+repeat task.wait() until LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+
+-- GUI
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "DeltaAutoClick"
+ScreenGui.ResetOnSpawn = false
 ScreenGui.Parent = game:GetService("CoreGui")
 
 local ToggleButton = Instance.new("TextButton")
@@ -52,16 +59,18 @@ SpeedSlider.Text = "0.40"
 SpeedSlider.PlaceholderText = "Tốc độ click"
 SpeedSlider.Parent = ScreenGui
 
+-- Vòng tròn
 local Circle = Drawing.new("Circle")
 Circle.Visible = false
 Circle.Color = Color3.new(1, 0, 0)
 Circle.Thickness = 1
 Circle.Filled = false
 
+-- Lưu trữ highlight box
 local HighlightBoxes = {}
 
 local function CreateHighlight(player)
-    if HighlightBoxes[player] then return end
+    if HighlightBoxes[player] then return HighlightBoxes[player] end
     local box = Drawing.new("Square")
     box.Visible = false
     box.Color = Color3.new(1, 0, 0)
@@ -89,6 +98,8 @@ local function GetNearestPlayer()
         if not char then continue end
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if not hrp then continue end
+        local humanoid = char:FindFirstChild("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then continue end
         local dist = (root.Position - hrp.Position).Magnitude
         if dist < minDist then
             minDist = dist
@@ -100,70 +111,98 @@ end
 
 local function UpdateHighlights()
     local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
     for _, player in ipairs(Players:GetPlayers()) do
         if player == LocalPlayer then continue end
         local char = player.Character
-        if not char then RemoveHighlight(player); continue end
+        if not char then
+            RemoveHighlight(player)
+            continue
+        end
         local hrp = char:FindFirstChild("HumanoidRootPart")
         local head = char:FindFirstChild("Head")
-        if not hrp or not head then RemoveHighlight(player); continue end
-        if root then
-            local dist = (root.Position - hrp.Position).Magnitude
-            if dist <= MaxDistance and IsEnabled then
-                local box = CreateHighlight(player)
-                local headPos, headOnScreen = Camera:WorldToViewportPoint(head.Position)
-                local footPos = hrp.Position - Vector3.new(0, 3.5, 0)
-                local footScreen, footOnScreen = Camera:WorldToViewportPoint(footPos)
-                if headOnScreen and footOnScreen then
-                    local size = math.abs(headPos.Y - footScreen.Y)
-                    local width = size * 0.5
-                    box.Visible = true
-                    box.Position = Vector2.new(headPos.X - width/2, headPos.Y)
-                    box.Size = Vector2.new(width, size)
-                else
-                    box.Visible = false
-                end
+        if not hrp or not head then
+            RemoveHighlight(player)
+            continue
+        end
+        local humanoid = char:FindFirstChild("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then
+            RemoveHighlight(player)
+            continue
+        end
+        local dist = (root.Position - hrp.Position).Magnitude
+        if dist <= MaxDistance and IsEnabled then
+            local box = CreateHighlight(player)
+            local headPos, headOnScreen = Camera:WorldToViewpointPoint(head.Position)
+            local footPos = hrp.Position - Vector3.new(0, 3.5, 0)
+            local footScreen, footOnScreen = Camera:WorldToViewportPoint(footPos)
+            if headOnScreen and footOnScreen then
+                local size = math.abs(headPos.Y - footScreen.Y)
+                local width = size * 0.5
+                box.Visible = true
+                box.Position = Vector2.new(headPos.X - width/2, headPos.Y)
+                box.Size = Vector2.new(width, size)
             else
-                RemoveHighlight(player)
+                box.Visible = false
             end
+        else
+            RemoveHighlight(player)
         end
     end
 end
 
 local function ClickOnPlayer(player)
     if not player or not player.Character then return end
-    local head = player.Character:FindFirstChild("Head")
     local humanoid = player.Character:FindFirstChild("Humanoid")
-    if head and humanoid and humanoid.Health > 0 then
-        local targetPos = head.Position - Vector3.new(0, 1.5, 0)
-        local screenPos, onScreen = Camera:WorldToViewportPoint(targetPos)
-        if onScreen then
-            VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, true, game, 1)
-            task.wait(0.05)
-            VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, false, game, 1)
-        end
+    if not humanoid or humanoid.Health <= 0 then return end
+    local torso = player.Character:FindFirstChild("UpperTorso") or player.Character:FindFirstChild("Torso")
+    local targetPart = torso or player.Character:FindFirstChild("HumanoidRootPart")
+    if not targetPart then return end
+    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+    if onScreen then
+        VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, true, game, 1)
+        VirtualInputManager:SendMouseButtonEvent(screenPos.X, screenPos.Y, 0, false, game, 1)
     end
 end
 
-RunService.Heartbeat:Connect(function()
-    local newDist = tonumber(DistSlider.Text)
-    if newDist and newDist > 0 then MaxDistance = newDist; DistLabel.Text = "Khoảng cách: " .. newDist end
-    local newSpeed = tonumber(SpeedSlider.Text)
-    if newSpeed and newSpeed > 0 then ClickSpeed = newSpeed; SpeedLabel.Text = "Click Speed: " .. string.format("%.2f", newSpeed) end
+local function UpdateCircle()
     if IsEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
         local rootPos = LocalPlayer.Character.HumanoidRootPart.Position
-        Circle.Visible = true
-        Circle.Position = Camera:WorldToViewportPoint(rootPos)
-        Circle.Radius = MaxDistance * (Camera.ViewportSize.Y / (2 * math.tan(math.rad(Camera.FieldOfView/2)) * (rootPos - Camera.CFrame.Position).Magnitude))
+        local screenPos, onScreen = Camera:WorldToViewportPoint(rootPos)
+        if onScreen then
+            Circle.Visible = true
+            Circle.Position = Vector2.new(screenPos.X, screenPos.Y)
+            local depth = (rootPos - Camera.CFrame.Position).Magnitude
+            Circle.Radius = MaxDistance * (Camera.ViewportSize.Y / (2 * math.tan(math.rad(Camera.FieldOfView/2)) * depth))
+        else
+            Circle.Visible = false
+        end
     else
         Circle.Visible = false
     end
+end
+
+RunService.RenderStepped:Connect(function()
+    local newDist = tonumber(DistSlider.Text)
+    if newDist and newDist > 0 then
+        MaxDistance = newDist
+        DistLabel.Text = "Khoảng cách: " .. newDist
+    end
+    local newSpeed = tonumber(SpeedSlider.Text)
+    if newSpeed and newSpeed > 0 then
+        ClickSpeed = newSpeed
+        SpeedLabel.Text = "Click Speed: " .. string.format("%.2f", newSpeed)
+    end
+    UpdateCircle()
     UpdateHighlights()
     if IsEnabled then
-        local currentTime = os.clock()
+        local currentTime = tick()
         if currentTime - LastClickTime >= ClickSpeed then
-            local target = GetNearestPlayer()
-            if target then ClickOnPlayer(target); LastClickTime = currentTime end
+            NearestTarget = GetNearestPlayer()
+            if NearestTarget then
+                ClickOnPlayer(NearestTarget)
+                LastClickTime = currentTime
+            end
         end
     end
 end)
@@ -176,13 +215,20 @@ ToggleButton.MouseButton1Click:Connect(function()
     else
         ToggleButton.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
         ToggleButton.Text = "ĐANG TẮT"
-        for player, _ in pairs(HighlightBoxes) do RemoveHighlight(player) end
+        Circle.Visible = false
+        for player, _ in pairs(HighlightBoxes) do
+            RemoveHighlight(player)
+        end
     end
 end)
 
-Players.PlayerRemoving:Connect(function(player) RemoveHighlight(player) end)
+Players.PlayerRemoving:Connect(function(player)
+    RemoveHighlight(player)
+end)
 
 ScreenGui.Destroying:Connect(function()
     Circle:Remove()
-    for player, _ in pairs(HighlightBoxes) do RemoveHighlight(player) end
+    for player, _ in pairs(HighlightBoxes) do
+        RemoveHighlight(player)
+    end
 end)
